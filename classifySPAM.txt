@@ -1,0 +1,432 @@
+'''
+  This program shell reads email data for the spam classification problem.
+  The input to the program is the path to the Email directory "corpus" and a limit number.
+  The program reads the first limit number of ham emails and the first limit number of spam.
+  It creates an "emaildocs" variable with a list of emails consisting of a pair
+    with the list of tokenized words from the email and the label either spam or ham.
+  It prints a few example emails.
+  Your task is to generate features sets and train and test a classifier.
+
+  Usage:  python classifySPAM.py  <corpus directory path> <limit number>
+'''
+# open python and nltk packages needed for processing
+import os
+import sys
+import random
+import nltk
+from nltk.corpus import stopwords
+
+# define a feature definition function here
+
+
+# function to read spam and ham files, train and test a classifier 
+def processspamham(dirPath,limitStr):
+  # convert the limit argument from a string to an int
+  limit = int(limitStr)
+  
+  # start lists for spam and ham email texts
+  hamtexts = []
+  spamtexts = []
+  os.chdir(dirPath)
+  # process all files in directory that end in .txt up to the limit
+  #    assuming that the emails are sufficiently randomized
+  for file in os.listdir("./spam"):
+    if (file.endswith(".txt")) and (len(spamtexts) < limit):
+      # open file for reading and read entire file into a string
+      f = open("./spam/"+file, 'r', encoding="latin-1")
+      spamtexts.append (f.read())
+      f.close()
+  for file in os.listdir("./ham"):
+    if (file.endswith(".txt")) and (len(hamtexts) < limit):
+      # open file for reading and read entire file into a string
+      f = open("./ham/"+file, 'r', encoding="latin-1")
+      hamtexts.append (f.read())
+      f.close()
+  
+  # print number emails read
+  print ("Number of spam files:",len(spamtexts))
+  print ("Number of ham files:",len(hamtexts))
+  print
+  
+  # create list of mixed spam and ham email documents as (list of words, label)
+  emaildocs = []
+  # add all the spam
+  for spam in spamtexts:
+    tokens = nltk.word_tokenize(spam)
+    emaildocs.append((tokens, 'spam'))
+  # add all the regular emails
+  for ham in hamtexts:
+    tokens = nltk.word_tokenize(ham)
+    emaildocs.append((tokens, 'ham'))
+  
+  # randomize the list
+  random.shuffle(emaildocs)
+
+
+ #print a few token lists
+  for email in emaildocs[:4]:
+    print (email)
+  
+  ## begin using answer key
+# python classifySPAM.py corpus 5
+
+import re
+import glob
+import random
+import pandas as pd
+from statistics import mean
+import matplotlib.pyplot as plt
+import nltk
+from nltk.util import ngrams
+import nltk.collocations as co_loc
+from scipy.spatial.distance import jensenshannon
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.model_selection import cross_val_predict
+from sklearn.metrics import confusion_matrix
+
+def get_emaildocs(spamtexts, hamtexts, tokenizer):
+    emaildocs = []
+    for spam in spamtexts:
+        emaildocs.append((tokenizer(spam), "spam"))
+    for ham in hamtexts:
+        emaildocs.append((tokenizer(ham), "ham"))
+    random.seed(5)
+    random.shuffle(emaildocs)
+    return emaildocs
+    
+def get_word_features(emails, n):
+    all_words_list = []
+    for email in emails:
+        all_words_list.extend(email[0])
+    all_words = nltk.FreqDist(all_words_list)
+    word_items = all_words.most_common(n)
+    word_features = [word for (word, count) in word_items]
+    return word_features
+    
+def get_bow_representation(email, word_features, use_bool=True):
+    email_words = email
+    features = {}
+    for word in word_features:
+        if use_bool:
+            features[word] = (word in set(email_words))
+        else:
+            features[word] = email_words.count(word)
+    return features
+#2
+stop_words = set(nltk.corpus.stopwords.words("english")) | set(["subject"])
+puncs = set([",", ".", "@", "#", "%", "^", "&", "*", "(", ")", "_", "-", "=", "+", "{", "}", "[", "]",
+             ":", ";", "'" '"', "<", ">", "?"])
+
+# Model Evaluation
+def get_full_cross_validation_eval_metrics(num_folds, featuresets):
+    accuracy_list = []
+    reference = []
+    hypothesis = []
+    subset_size = int(len(featuresets) / 10)
+    for i in range(num_folds):
+        round_test = featuresets[(i * subset_size):][:subset_size]
+        round_train = featuresets[:(i * subset_size)] + featuresets[((i + 1) * subset_size):]
+        clf = nltk.NaiveBayesClassifier.train(round_train)
+        correct = 0
+        for case in round_test:
+            features = case[0]
+            label = case[1]; reference.append(label)
+            pred = clf.classify(features); hypothesis.append(pred)
+            if label == pred:
+                correct += 1
+        accuracy = float(correct) / float(len(round_test))
+        accuracy_list.append(accuracy)
+        print("Accuracy for Fold {}: {}".format(i, accuracy))
+    print("---Average Accuracy: {}---".format(mean(accuracy_list)))
+    labels = set(reference)
+    recall_list = []
+    precision_list = []
+    F1_list = []
+    unable_to_calc = False
+    for label in labels:
+        TP = FP = FN = TN = 0
+        for i, val in enumerate(reference):
+            if val == label and hypothesis[i] == label: TP += 1
+            elif val == label and hypothesis[i] != label: FN += 1
+            elif val != label and hypothesis[i] == label: FP += 1
+            #elif val != label and hypothesis[i] != label: TN += 1
+            else: TN += 1
+        try:
+            recall = TP / (TP + FP)
+            precision = TP / (TP + FN)
+            recall_list.append(recall)
+            precision_list.append(precision)
+            F1_list.append(2 * (recall * precision) / (recall + precision))
+        except ZeroDivisionError:
+            unable_to_calc = True
+    print("\n\tPrecision\tRecall\t\tF1")
+    if not unable_to_calc:
+        for i, label in enumerate(labels):
+            print("{}\t{}\t\t{}\t\t{}".format(label, round(precision_list[i], 3),
+                                              round(recall_list[i], 3), round(F1_list[i], 3)))
+    print("\n")
+    print(nltk.ConfusionMatrix(reference, hypothesis).pretty_format(sort_by_count=True))
+    print(nltk.ConfusionMatrix(reference, hypothesis).pretty_format(sort_by_count=True, show_percents=True))
+
+# SKLearn Model Evaluation
+def get_sklearn_model_evaluation_metrics(reference, hypothesis):
+    labels = set(reference)
+    recall_list = []
+    precision_list = []
+    F1_list = []
+    correct = 0
+    for label in labels:
+        TP= FP = FN = TN = 0
+        for i, val in enumerate(reference):
+            if val == label and hypothesis[i] == label:
+                TP += 1
+                correct == 1
+            elif val == label and hypothesis[i] != label: FN += 1
+            elif val != label and hypothesis[i] == label: FP += 1
+            else:
+                TN += 1
+                correct += 1
+        recall = TP / (TP + FP)
+        precision = TP / (TP + FN)
+        recall_list.append(recall)
+        precision_list.append(precision)
+        F1_list.append(2 * (recall * precision) / (recall + precision))
+    print("Accuracy: {}".format(round(float(correct) / float(len(reference)), 3)))
+    print("\n\tPrecision\tRecall\t\tF1")
+    for i, label in enumerate(labels):
+        print("{}\t{}\t\t{}\t\t{}".format(label, round(precision_list[i], 3),
+                                          round(recall_list[i], 3), round(F1_list[i], 3)))
+    print()
+    print(confusion_matrix(reference, hypothesis))
+
+# Unigram Bag of Words
+def get_bow_representation(email, word_features, use_bool=True):
+    email_words = email
+    features = {}
+    for word in word_features:
+        if use_bool:
+            features[word] = (word in set(email_words))
+        else:
+            features[word] = email_words.count(word)
+    return features
+
+# Bigram Bag of Words
+def get_bigram_bow_representation(email, bigram_features, use_bool=True):
+    email_bigrams = [" ".join(bigram) for bigram in ngrams(email, 2)]
+    features = {}
+    for bigram in bigram_features:
+        if use_bool:
+            features[bigram] = (bigram in set(email_bigrams))
+        else:
+            features[bigram] = email_bigrams.count(bigram)
+    return features
+
+# Get top N word in a frequence distribution
+def get_word_features(emails, n):
+    all_words_list = []
+    for email in emails:
+        all_words_list.extend(email[0])
+    all_words = nltk.FreqDist(all_words_list)
+    word_items = all_words.most_common(n)
+    word_features = [word for (word, count) in word_items]
+    return word_features
+
+# Get punctuation features
+def get_punctuation_features(emaildocs):
+    punctuation_list = set()
+    for email in emaildocs:
+        for tok in email[0]:
+            if len(re.findall(r"\w", tok)) == 0:
+                punctuation_list.add(tok)
+    return punctuation_list
+
+# Apply Tokenization to Spam and Ham, combine, and return
+def get_emaildocs(spamtexts, hamtexts, tokenizer):
+    emaildocs = []
+    for spam in spamtexts:
+        emaildocs.append((tokenizer(spam), "spam"))
+    for ham in hamtexts:
+        emaildocs.append((tokenizer(ham), "ham"))
+    random.seed(5)
+    random.shuffle(emaildocs)
+    return emaildocs
+
+# Remove Stop Words
+def remove_stopwords(emaildocs, stop_words):
+    final_emails = []
+    for email in emaildocs:
+        final_emails.append(([tok for tok in email[0] if tok not in stop_words], email[1]))
+    random.seed(5)
+    random.shuffle(final_emails)
+    return final_emails
+
+# Custom Tokenizer
+def custom_tokenizer(email):
+    tokenizer_pattern = r'''(?x)
+                        [a-z]+(?:['\-][a-z]+)+
+                        |[a-z]+
+                        |\$\d+
+                     '''
+    return nltk.regexp_tokenize(email.lower().replace(" ' ", "'").replace("$ ", "$").replace(" - ", "-"), tokenizer_pattern)
+
+# Use NLTK's Tokenizer, Joining Dollar Sign to Following Token
+def tokenize_with_dollars(email):
+    return nltk.word_tokenize(email.lower().replace("$ ", "$"))
+
+# Tokenize and Stem
+def tokenize_and_stem(email):
+    stemmer = nltk.PorterStemmer()
+    return [stemmer.stem(tok) for tok in nltk.word_tokenize(email)]
+
+# Convert NLTK Features to Pandas DataFrame for SKlearn
+def convert_nltk_features_to_df(features):
+    pos_neg_map = {"spam": 1, "ham": 0}
+    first_pass = True
+    df = None
+    for feats in features:
+        if first_pass:
+            df = {feat: [] for feat in feats[0].keys()}
+            df["label"] = []
+            first_pass = False
+        df["label"].append(pos_neg_map[feats[1]])
+        for feat, val in feats[0].items():
+            df[feat].append(val)
+    return pd.DataFrame(df)
+
+
+
+#3 
+hamtexts = []
+spamtexts = []
+
+for file in glob.glob("corpus/*/*.txt"):
+    with open(file, "r", encoding="latin-1") as _f:
+        if file.endswith("ham.txt"):
+            hamtexts.append(_f.read())
+        else:
+            spamtexts.append(_f.read())
+              
+#5
+random.seed(5)
+hamtexts = random.sample(hamtexts, len(spamtexts))
+print("New number of spam files: {}\n"      "New number of ham files:  {}".format(len(spamtexts), len(hamtexts)))
+   
+# 6
+ham_words = [tok for email in hamtexts for tok in nltk.word_tokenize(email)]
+spam_words = [tok for email in spamtexts for tok in nltk.word_tokenize(email)]
+#7
+ham_dist = nltk.FreqDist(ham_words)
+spam_dist = nltk.FreqDist(spam_words)
+
+ham_most_common_counts = ham_dist.most_common(500)
+ham_most_common = set([entry[0] for entry in ham_most_common_counts])
+spam_most_common_counts = spam_dist.most_common(500)
+spam_most_common = set([entry[0] for entry in spam_most_common_counts])
+
+spam_minus_ham = spam_most_common - ham_most_common
+ham_minus_spam = ham_most_common - spam_most_common
+in_common = ham_most_common.intersection(spam_most_common)
+
+print("Count diff spam - ham: {}".format(len(spam_most_common)))
+print("Count diff ham - spam: {}".format(len(ham_minus_spam)))
+print("Count in common: {}".format(len(in_common)))
+   
+#8 
+print("ham\t\t\tspam")
+for i in range(len(ham_most_common_counts)):
+    if i > 14:
+        break
+    print("{}\t\t{}".format(ham_most_common_counts[i], spam_most_common_counts[i]))
+    
+#9
+ham_words_uniq = set(ham_words)
+spam_words_uniq = set(spam_words)
+
+print("Unique Ham Tokens: {}".format(len(ham_words_uniq)))
+print("Unique Spam Tokens: {}".format(len(spam_words_uniq)))
+print("Total Unique Tokens: {}".format(len(ham_words_uniq | spam_words_uniq)))
+    
+# 13
+emaildocs = get_emaildocs(spamtexts, hamtexts, nltk.word_tokenize)
+word_freqs_per_doc = {"ham": {}, "spam": {}}
+all_toks = set()
+for email in emaildocs:
+    email_text, label = email
+    email_toks = set(email_text)
+    for tok in email_toks:
+        all_toks.add(tok)
+        if tok not in word_freqs_per_doc[label]:
+            word_freqs_per_doc[label][tok] = []
+        word_freqs_per_doc[label][tok].append(email_text.count(tok))
+
+ave_word_freqs_per_doc_df = {"tok": [], "ham": [], "spam": []}
+for tok in all_toks:
+    ave_word_freqs_per_doc_df["tok"].append(tok)
+    for label in ["ham", "spam"]:
+        if tok in word_freqs_per_doc[label]:
+            ave_word_freqs_per_doc_df[label].append(mean(word_freqs_per_doc[label][tok]))
+        else:
+            ave_word_freqs_per_doc_df[label].append(0)
+ave_word_freqs_per_doc_df = pd.DataFrame(ave_word_freqs_per_doc_df)
+
+#14
+emaildocs = get_emaildocs(spamtexts, hamtexts, nltk.word_tokenize)
+word_features = get_word_features(emaildocs, 2000)
+bow_features = [(get_bow_representation(email, word_features), label) for (email, label) in emaildocs]
+get_full_cross_validation_eval_metrics(10, bow_features)
+
+#15
+#for n in [500, 1000, 1500, 3000, 5000, 7500, 10000]:
+#    word_features = get_word_features(emaildocs, n)
+#    bow_features = [(get_bow_representation(email, word_features), label) for (email, label) in emaildocs]
+#    get_full_cross_validation_eval_metrics(10, bow_features)
+    
+#16
+emaildocs = get_emaildocs(spamtexts, hamtexts, custom_tokenizer)
+word_features = get_word_features(emaildocs, 3000)
+bow_features = [(get_bow_representation(email, word_features), label) for (email, label) in emaildocs]
+get_full_cross_validation_eval_metrics(10, bow_features)
+
+#17
+#emaildocs = remove_stopwords(emaildocs, stop_words)
+#word_features = get_word_features(emaildocs, 3000)
+#bow_features = [(get_bow_representation(email, word_features), label) for (email, label) in emaildocs]
+#get_full_cross_validation_eval_metrics(10, bow_features)
+
+#18
+#emaildocs = get_emaildocs(spamtexts, hamtexts, tokenize_with_dollars)
+#word_features = get_word_features(emaildocs, 3000)
+#bow_features = [(get_bow_representation(email, word_features), label) for (email, label) in emaildocs]
+#get_full_cross_validation_eval_metrics(10, bow_features)
+
+
+
+# get the 2000 most frequently appearing keywords in the corpus
+#word_items = all_words.most_common(2000)
+#word_features = [word for (word, freq) in word_items]
+
+# look at the first 100 words
+#print(word_features[:100])
+  
+  # possibly filter tokens
+
+  # continue as usual to get all words and create word features
+  
+  # feature sets from a feature definition function
+
+  # train classifier and show performance in cross-validation
+
+
+
+"""
+commandline interface takes a directory name with ham and spam subdirectories
+   and a limit to the number of emails read each of ham and spam
+It then processes the files and trains a spam detection classifier.
+
+"""
+if __name__ == '__main__':
+    if (len(sys.argv) != 3):
+        print ('usage: python classifySPAM.py <corpus-dir> <limit>')
+        sys.exit(0)
+    processspamham(sys.argv[1], sys.argv[2])
+        
